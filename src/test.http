@@ -1,0 +1,36 @@
+### 1. Проверка, что сервер жив (GET)
+GET http://localhost:8080/
+
+### 2. Вход Админа (POST)
+POST http://localhost:8080/api/auth/login
+Content-Type: application/json
+
+{
+  "type": "STAFF",
+  "identifier": "admin",
+  "password": "admin123"
+}
+
+### 3. Вход Гостя (POST)
+# Используем телефон из тестовых данных
+POST http://localhost:8080/api/auth/login
+Content-Type: application/json
+
+{
+  "type": "GUEST",
+  "identifier": "+79001112233"
+}
+
+### 4. Создание заявки Гостем (POST)
+# Важно: Заголовки пишутся через двоеточие перед телом
+POST http://localhost:8080/api/tickets
+Content-Type: application/json
+X-Guest-Id: 1
+
+{
+  "categoryId": 1,
+  "description": "Не работает кондиционер в номере 101"
+}
+
+### 5. Получить список заявок Админа (GET)
+GET http://localhost:8080/api/admin/tickets
