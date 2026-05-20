@@ -1,4 +1,4 @@
-package Data
+package com.example.Data
 
 import kotlinx.serialization.Serializable
 
@@ -20,6 +20,13 @@ data class TicketDto(
     val description: String,
     val status: String,
     val createdAt: String
+)
+
+@Serializable
+data class CreateStaffRequest(
+    val username: String,
+    val password: String,
+    val role: String
 )
 
 @Serializable

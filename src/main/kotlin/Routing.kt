@@ -1,32 +1,29 @@
 package com.example.plugins
 
-import Data.AuthResponse
-import Data.CreateTicketRequest
-import Data.LoginRequest
-import Data.TicketDto
-import Data.UpdateStatusRequest
+import com.example.Data.AuthResponse
+import com.example.Data.CreateStaffRequest
+import com.example.Data.CreateTicketRequest
+import com.example.Data.LoginRequest
+import com.example.Data.TicketDto
+import com.example.Data.UpdateStatusRequest
 import com.example.Data.Categories
 import com.example.Data.Guests
 import com.example.Data.Staff
 import com.example.Data.Tickets
 import io.ktor.http.*
 import io.ktor.server.application.*
+import io.ktor.server.http.content.staticResources
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import kotlinx.serialization.Serializable
-import org.jetbrains.exposed.dao.id.EntityID
+import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.transactions.transaction
-import java.sql.Timestamp
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
-@Serializable
-data class LoginRequest(val type: String, val identifier: String, val password: String? = null)
-
-@Serializable
-data class CreateTicketRequest(val categoryId: Int, val description: String)
+// ... остальной код
 
 @Serializable
 data class TicketResponse(
@@ -42,8 +39,44 @@ data class TicketResponse(
 fun Application.configureRouting() {
     routing {
         // Проверка работоспособности
+        staticResources("/", "static", index = "login.html")
         get("/") {
-            call.respondText("Hotel API is running!")
+            call.respondRedirect("/login.html")
+        }
+
+        post("/api/admin/staff") {
+            try {
+                // Явно читаем body как строку и парсим
+                val body = call.receiveText()
+                println("Received body: $body") // Для отладки
+
+                val req = Json {
+                    ignoreUnknownKeys = true
+                }.decodeFromString<CreateStaffRequest>(body)
+
+                val exists = transaction {
+                    Staff.select { Staff.username eq req.username }.firstOrNull()
+                }
+
+                if (exists != null) {
+                    call.respond(HttpStatusCode.Conflict, "User already exists")
+                    return@post
+                }
+
+                transaction {
+                    Staff.insert {
+                        it[username] = req.username
+                        it[passwordHash] = req.password // В реальном проекте хешируйте!
+                        it[role] = req.role
+                    }
+                }
+
+                call.respond(HttpStatusCode.Created, mapOf("message" to "Staff created successfully"))
+            } catch (e: Exception) {
+                println("Error: ${e.message}")
+                e.printStackTrace()
+                call.respond(HttpStatusCode.BadRequest, "Invalid request: ${e.message}")
+            }
         }
 
         // Авторизация
@@ -54,12 +87,11 @@ fun Application.configureRouting() {
                 if (req.type == "GUEST") {
                     val guest = Guests.select { Guests.phone eq req.identifier }.firstOrNull()
                     if (guest != null) {
-                        mapOf(
-                            "token" to "guest_${guest[Guests.id]}",
-                            "role" to "GUEST",
-                            "guestId" to guest[Guests.id],
-                            "name" to guest[Guests.fullName],
-                            "room" to guest[Guests.roomNumber]
+                        // Возвращаем data class вместо Map
+                        AuthResponse(
+                            token = "guest_${guest[Guests.id]}",
+                            role = "GUEST",
+                            guestId = guest[Guests.id]
                         )
                     } else null
                 } else {
@@ -69,10 +101,11 @@ fun Application.configureRouting() {
                     }.firstOrNull()
 
                     if (staff != null) {
-                        mapOf(
-                            "token" to "staff_${staff[Staff.id]}",
-                            "role" to staff[Staff.role],
-                            "staffId" to staff[Staff.id]
+                        // Возвращаем data class вместо Map
+                        AuthResponse(
+                            token = "staff_${staff[Staff.id]}",
+                            role = staff[Staff.role],
+                            guestId = null
                         )
                     } else null
                 }

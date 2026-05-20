@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Login</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="card">
+    <h2>Вход</h2>
+
+    <select id="type">
+        <option value="GUEST">Гость</option>
+        <option value="STAFF">Сотрудник</option>
+    </select>
+
+    <input id="identifier" type="text" placeholder="Телефон или логин">
+    <input id="password" type="password" placeholder="Пароль">
+    <button onclick="login()">Войти</button>
+
+    <div id="msg"></div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>

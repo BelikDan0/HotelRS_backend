@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Admin Panel</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="card">
+    <h2>Все заявки</h2>
+    <button onclick="loadAllTickets()">Загрузить</button>
+    <div id="tickets"></div>
+</div>
+<div class="card">
+    <h2>Добавить сотрудника</h2>
+
+    <input id="username" type="text" placeholder="Логин">
+    <input id="password" type="password" placeholder="Пароль">
+    <input id="role" type="text" placeholder="Роль, например ADMIN или STAFF">
+
+    <button onclick="addStaff()">Добавить</button>
+    <div id="msg"></div>
+</div>
+<script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Guest Panel</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="card">
+    <h2>Создать заявку</h2>
+    <input id="categoryId" type="number" placeholder="Category ID">
+    <textarea id="description" placeholder="Описание"></textarea>
+    <button onclick="createTicket()">Создать</button>
+
+    <h3>Мои заявки</h3>
+    <button onclick="loadTickets()">Обновить</button>
+    <div id="tickets"></div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>
