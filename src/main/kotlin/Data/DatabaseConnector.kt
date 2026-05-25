@@ -16,7 +16,7 @@ object DatabaseConnector {
             url = "jdbc:postgresql://localhost:5432/database_number_hotel",
             driver = "org.postgresql.Driver",
             user = "postgres",
-            password = "123" // <-- ЗАМЕНИ НА СВОЙ ПАРОЛЬ ОТ PG
+            password = "2324" // <-- ЗАМЕНИ НА СВОЙ ПАРОЛЬ ОТ PG
         )
     }
 

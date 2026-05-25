@@ -25,6 +25,9 @@ import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
+import java.util.Date
+
+// ======================== DTO ========================
 
 @Serializable
 data class TicketResponse(
@@ -37,27 +40,67 @@ data class TicketResponse(
     val createdAt: String
 )
 
+@Serializable
+data class GuestResponse(
+    val id: Int,
+    val fullName: String,
+    val roomNumber: String,
+    val phone: String,
+    val isActive: Boolean
+)
+
+@Serializable
+data class StaffResponse(
+    val id: Int,
+    val username: String,
+    val role: String
+)
+
+@Serializable
+data class CreateGuestRequest(
+    val fullName: String,
+    val roomNumber: String,
+    val phone: String
+)
+
+@Serializable
+data class UpdateGuestRequest(
+    val fullName: String,
+    val phone: String,
+    val roomNumber: String,
+    val isActive: Boolean
+)
+
+@Serializable
+data class UpdateStaffRequest(
+    val username: String,
+    val role: String
+)
+
+// ======================== Роутинг ========================
+
 fun Application.configureRouting() {
-    // Конфигурация секретов для JWT (должна совпадать с той, что указана при install(Authentication))
+    val jsonWorker = Json { ignoreUnknownKeys = true }
+
     val jwtSecret = "super-secret-key-sochi-2026"
     val jwtIssuer = "http://0.0.0.0:8080/"
     val jwtAudience = "hotel-audience"
 
     routing {
-        // Проверка работоспособности (открытые ресурсы)
+        // Статические файлы и редирект
         staticResources("/", "static", index = "login.html")
         get("/") {
             call.respondRedirect("/login.html")
         }
 
-        // Регистрация сотрудников (открытый эндпоинт, либо можешь перенести внутрь authenticate для админов)
+        // Регистрация сотрудников (админ)
         post("/api/admin/staff") {
             try {
                 val body = call.receiveText()
-                val req = Json { ignoreUnknownKeys = true }.decodeFromString<CreateStaffRequest>(body)
+                val req = jsonWorker.decodeFromString<CreateStaffRequest>(body)
 
                 val exists = transaction {
-                    Staff.select { Staff.username eq req.username }.firstOrNull()
+                    Staff.selectAll().where { Staff.username eq req.username }.firstOrNull()
                 }
 
                 if (exists != null) {
@@ -67,9 +110,9 @@ fun Application.configureRouting() {
 
                 transaction {
                     Staff.insert {
-                        it[username] = req.username
-                        it[passwordHash] = req.password // В продакшене обязательно хешируй!
-                        it[role] = req.role
+                        it[Staff.username] = req.username
+                        it[Staff.passwordHash] = req.password
+                        it[Staff.role] = req.role
                     }
                 }
 
@@ -79,41 +122,39 @@ fun Application.configureRouting() {
             }
         }
 
-        // Авторизация (выдача JWT токена)
+        // Авторизация (выдача JWT)
         post("/api/auth/login") {
             val req = call.receive<LoginRequest>()
 
             val authResponse = transaction {
                 if (req.type == "GUEST") {
-                    val guest = Guests.select { Guests.phone eq req.identifier }.firstOrNull()
+                    val guest = Guests.selectAll().where { Guests.phone eq req.identifier }.firstOrNull()
                     if (guest != null) {
                         val guestId = guest[Guests.id]
-                        // Генерируем токен для Гостя
                         val token = JWT.create()
                             .withAudience(jwtAudience)
                             .withIssuer(jwtIssuer)
                             .withClaim("userId", guestId)
                             .withClaim("role", "GUEST")
+                            .withExpiresAt(Date(System.currentTimeMillis() + 24 * 3600 * 1000))
                             .sign(Algorithm.HMAC256(jwtSecret))
-
                         AuthResponse(token = token, role = "GUEST", guestId = guestId)
                     } else null
                 } else {
-                    val staff = Staff.select {
+                    val staff = Staff.selectAll().where {
                         (Staff.username eq req.identifier) and (Staff.passwordHash eq (req.password ?: ""))
                     }.firstOrNull()
 
                     if (staff != null) {
                         val staffId = staff[Staff.id]
                         val staffRole = staff[Staff.role]
-                        // Генерируем токен для Персонала/Админа
                         val token = JWT.create()
                             .withAudience(jwtAudience)
                             .withIssuer(jwtIssuer)
                             .withClaim("userId", staffId)
                             .withClaim("role", staffRole)
+                            .withExpiresAt(Date(System.currentTimeMillis() + 24 * 3600 * 1000))
                             .sign(Algorithm.HMAC256(jwtSecret))
-
                         AuthResponse(token = token, role = staffRole, guestId = null)
                     } else null
                 }
@@ -126,21 +167,170 @@ fun Application.configureRouting() {
             }
         }
 
-        // ==========================================================
-        // ЗАЩИЩЕННЫЕ РОУТЫ (Доступны только по валидному Bearer JWT токену)
-        // ==========================================================
+        // ==================== ЗАЩИЩЁННЫЕ РОУТЫ (JWT) ====================
         authenticate("auth-jwt") {
 
-            // Создание заявки гостем
+            // ---------- Гости (админ) ----------
+            get("/api/admin/guests") {
+                val principal = call.principal<JWTPrincipal>()
+                val role = principal?.payload?.getClaim("role")?.asString()
+                if (role != "ADMIN") {
+                    return@get call.respond(HttpStatusCode.Forbidden, "Only admin can view guests")
+                }
+                val guestsList = transaction {
+                    Guests.selectAll().map { row ->
+                        GuestResponse(
+                            id = row[Guests.id],
+                            fullName = row[Guests.fullName],
+                            roomNumber = row[Guests.roomNumber],
+                            phone = row[Guests.phone],
+                            isActive = row[Guests.isActive]
+                        )
+                    }
+                }
+                call.respond(guestsList)
+            }
+
+            post("/api/admin/guests") {
+                val principal = call.principal<JWTPrincipal>()
+                val role = principal?.payload?.getClaim("role")?.asString()
+                if (role != "ADMIN") {
+                    return@post call.respond(HttpStatusCode.Forbidden, "Only admin can add guests")
+                }
+                val req = call.receive<CreateGuestRequest>()
+                transaction {
+                    Guests.insert {
+                        it[Guests.fullName] = req.fullName
+                        it[Guests.roomNumber] = req.roomNumber
+                        it[Guests.phone] = req.phone
+                    }
+                }
+                call.respond(HttpStatusCode.Created, mapOf("message" to "Guest added successfully"))
+            }
+
+            put("/api/admin/guests/{id}") {
+                val principal = call.principal<JWTPrincipal>()
+                val role = principal?.payload?.getClaim("role")?.asString()
+                if (role != "ADMIN") {
+                    return@put call.respond(HttpStatusCode.Forbidden, "Only admin can update guests")
+                }
+                val guestId = call.parameters["id"]?.toIntOrNull()
+                    ?: return@put call.respond(HttpStatusCode.BadRequest, "Invalid guest ID")
+                val req = call.receive<UpdateGuestRequest>()
+                val updated = transaction {
+                    Guests.update({ Guests.id eq guestId }) {
+                        it[Guests.fullName] = req.fullName
+                        it[Guests.phone] = req.phone
+                        it[Guests.roomNumber] = req.roomNumber
+                        it[Guests.isActive] = req.isActive
+                    }
+                }
+                if (updated > 0) {
+                    call.respond(mapOf("message" to "Guest updated successfully"))
+                } else {
+                    call.respond(HttpStatusCode.NotFound, "Guest not found")
+                }
+            }
+
+            delete("/api/admin/guests/{id}") {
+                val principal = call.principal<JWTPrincipal>()
+                val role = principal?.payload?.getClaim("role")?.asString()
+                if (role != "ADMIN") {
+                    return@delete call.respond(HttpStatusCode.Forbidden, "Only admin can delete guests")
+                }
+                val guestId = call.parameters["id"]?.toIntOrNull()
+                    ?: return@delete call.respond(HttpStatusCode.BadRequest, "Invalid guest ID")
+
+                try {
+                    transaction {
+                        // 1. Удаляем все заявки этого гостя
+                        Tickets.deleteWhere { Tickets.guestId eq guestId }
+                        // 2. Удаляем самого гостя
+                        val deleted = Guests.deleteWhere { Guests.id eq guestId }
+                        if (deleted == 0) {
+                            throw Exception("Guest not found")
+                        }
+                    }
+                    call.respond(mapOf("message" to "Guest deleted successfully"))
+                } catch (e: Exception) {
+                    call.respond(HttpStatusCode.InternalServerError, "Failed to delete guest: ${e.message}")
+                }
+            }
+
+            // ---------- Сотрудники (админ) ----------
+            get("/api/admin/staff") {
+                val principal = call.principal<JWTPrincipal>()
+                val role = principal?.payload?.getClaim("role")?.asString()
+                if (role != "ADMIN") {
+                    return@get call.respond(HttpStatusCode.Forbidden, "Only admin can view staff")
+                }
+                val staffList = transaction {
+                    Staff.selectAll().map { row ->
+                        StaffResponse(
+                            id = row[Staff.id],
+                            username = row[Staff.username],
+                            role = row[Staff.role]
+                        )
+                    }
+                }
+                call.respond(staffList)
+            }
+
+            put("/api/admin/staff/{id}") {
+                val principal = call.principal<JWTPrincipal>()
+                val role = principal?.payload?.getClaim("role")?.asString()
+                if (role != "ADMIN") {
+                    return@put call.respond(HttpStatusCode.Forbidden, "Only admin can update staff")
+                }
+                val staffId = call.parameters["id"]?.toIntOrNull()
+                    ?: return@put call.respond(HttpStatusCode.BadRequest, "Invalid staff ID")
+                val req = call.receive<UpdateStaffRequest>()
+                val updated = transaction {
+                    Staff.update({ Staff.id eq staffId }) {
+                        it[Staff.username] = req.username
+                        it[Staff.role] = req.role
+                    }
+                }
+                if (updated > 0) {
+                    call.respond(mapOf("message" to "Staff updated successfully"))
+                } else {
+                    call.respond(HttpStatusCode.NotFound, "Staff not found")
+                }
+            }
+
+            delete("/api/admin/staff/{id}") {
+                val principal = call.principal<JWTPrincipal>()
+                val role = principal?.payload?.getClaim("role")?.asString()
+                if (role != "ADMIN") {
+                    return@delete call.respond(HttpStatusCode.Forbidden, "Only admin can delete staff")
+                }
+                val staffId = call.parameters["id"]?.toIntOrNull()
+                    ?: return@delete call.respond(HttpStatusCode.BadRequest, "Invalid staff ID")
+
+                try {
+                    transaction {
+                        // Если есть заявки, назначенные на этого сотрудника – обнуляем assignedStaffId
+                        Tickets.update({ Tickets.assignedStaffId eq staffId }) {
+                            it[Tickets.assignedStaffId] = null
+                        }
+                        val deleted = Staff.deleteWhere { Staff.id eq staffId }
+                        if (deleted == 0) {
+                            throw Exception("Staff not found")
+                        }
+                    }
+                    call.respond(mapOf("message" to "Staff deleted successfully"))
+                } catch (e: Exception) {
+                    call.respond(HttpStatusCode.InternalServerError, "Failed to delete staff: ${e.message}")
+                }
+            }
+
+            // ---------- Заявки (гость) ----------
             post("/api/tickets") {
                 val principal = call.principal<JWTPrincipal>()
-                // Вытаскиваем ID гостя прямо из токена, безопасность 100%
                 val guestId = principal?.payload?.getClaim("userId")?.asInt()
                     ?: return@post call.respond(HttpStatusCode.Unauthorized, "Invalid token claims")
-
                 val req = call.receive<CreateTicketRequest>()
                 val now = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
-
                 transaction {
                     Tickets.insert {
                         it[Tickets.guestId] = guestId
@@ -154,15 +344,13 @@ fun Application.configureRouting() {
                 call.respond(HttpStatusCode.Created, mapOf("message" to "Ticket created successfully"))
             }
 
-            // Получение списка заявок текущего гостя
             get("/api/guest/tickets") {
                 val principal = call.principal<JWTPrincipal>()
                 val guestId = principal?.payload?.getClaim("userId")?.asInt()
                     ?: return@get call.respond(HttpStatusCode.Unauthorized, "Invalid token claims")
-
-                val tickets: List<TicketResponse> = transaction {
+                val tickets = transaction {
                     (Tickets innerJoin Guests innerJoin Categories)
-                        .select { Tickets.guestId eq guestId }
+                        .selectAll().where { Tickets.guestId eq guestId }
                         .orderBy(Tickets.createdAt to SortOrder.DESC)
                         .map { row ->
                             TicketResponse(
@@ -179,98 +367,88 @@ fun Application.configureRouting() {
                 call.respond(tickets)
             }
 
-            // Получение всех заявок (для админа/персонала)
-            get("/api/admin/tickets") {
-                val principal = call.principal<JWTPrincipal>()
-                val role = principal?.payload?.getClaim("role")?.asString()
-
-                if (role != "ADMIN" && role != "CLEANER" && role != "MASTER") {
-                    return@get call.respond(HttpStatusCode.Forbidden, "Only staff can view all tickets")
-                }
-
-                val statusFilter = call.request.queryParameters["status"]
-
-                val tickets: List<TicketResponse> = transaction {
-                    val query = (Tickets innerJoin Guests innerJoin Categories)
-                    val select = if (statusFilter != null) {
-                        query.select { Tickets.status eq statusFilter }
-                    } else {
-                        query.selectAll()
-                    }
-
-                    select.orderBy(Tickets.createdAt to SortOrder.DESC)
-                        .map { row ->
-                            TicketResponse(
-                                id = row[Tickets.id],
-                                guestName = row[Guests.fullName],
-                                roomNumber = row[Guests.roomNumber],
-                                categoryName = row[Categories.name],
-                                description = row[Tickets.description],
-                                status = row[Tickets.status],
-                                createdAt = row[Tickets.createdAt]
-                            )
-                        }
-                }
-                call.respond(tickets)
-            }
-
-            // Изменение статуса заявки сотрудником
-            put("/api/tickets/{id}/status") {
-                val ticketId = call.parameters["id"]?.toIntOrNull()
-                    ?: return@put call.respond(HttpStatusCode.BadRequest, "Invalid ticket ID")
-
-                val req = call.receive<Map<String, String>>()
-                val newStatus = req["status"] ?: return@put call.respond(HttpStatusCode.BadRequest, "Missing status")
-                val now = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
-
-                val updatedRows = transaction {
-                    Tickets.update({ Tickets.id eq ticketId }) {
-                        it[status] = newStatus
-                        it[updatedAt] = now
-                    }
-                }
-
-                if (updatedRows > 0) {
-                    call.respond(HttpStatusCode.OK, mapOf("message" to "Status updated successfully"))
-                } else {
-                    call.respond(HttpStatusCode.NotFound, "Ticket not found")
-                }
-            }
-
-            // Удаление заявки
-            delete("/api/tickets/{id}") {
-                val ticketId = call.parameters["id"]?.toIntOrNull()
-                    ?: return@delete call.respond(HttpStatusCode.BadRequest, "Invalid ticket ID")
-
-                val deletedRows = transaction {
-                    Tickets.deleteWhere { Tickets.id eq ticketId }
-                }
-
-                if (deletedRows > 0) {
-                    call.respond(HttpStatusCode.OK, mapOf("message" to "Ticket deleted successfully"))
-                } else {
-                    call.respond(HttpStatusCode.NotFound, "Ticket not found")
-                }
-            }
-
-            // Изменение содержимого заявки гостем (редактирование описания/категории)
             patch("/api/tickets/{id}") {
                 val ticketId = call.parameters["id"]?.toIntOrNull()
                     ?: return@patch call.respond(HttpStatusCode.BadRequest, "Invalid ticket ID")
-
                 val req = call.receive<CreateTicketRequest>()
                 val now = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
-
                 val updatedRows = transaction {
                     Tickets.update({ Tickets.id eq ticketId }) {
-                        it[categoryId] = req.categoryId
-                        it[description] = req.description
-                        it[updatedAt] = now
+                        it[Tickets.categoryId] = req.categoryId
+                        it[Tickets.description] = req.description
+                        it[Tickets.updatedAt] = now
                     }
                 }
-
                 if (updatedRows > 0) {
-                    call.respond(HttpStatusCode.OK, mapOf("message" to "Ticket updated successfully"))
+                    call.respond(mapOf("message" to "Ticket updated successfully"))
+                } else {
+                    call.respond(HttpStatusCode.NotFound, "Ticket not found")
+                }
+            }
+
+            // ---------- Заявки (админ/персонал) ----------
+            listOf("/api/admin/tickets", "/api/staff/tickets").forEach { path ->
+                get(path) {
+                    val principal = call.principal<JWTPrincipal>()
+                    val role = principal?.payload?.getClaim("role")?.asString()?.uppercase()
+                    val allowedRoles = setOf("ADMIN", "CLEANER", "MASTER", "STAFF_CLEANER", "STAFF_ENGINEER", "STAFF_WAITER")
+                    if (role == null || role !in allowedRoles) {
+                        return@get call.respond(HttpStatusCode.Forbidden, "Only staff can view these tickets")
+                    }
+                    val statusFilter = call.request.queryParameters["status"]
+                    val tickets = transaction {
+                        val query = Tickets
+                            .innerJoin(Guests, { Tickets.guestId }, { Guests.id })
+                            .innerJoin(Categories, { Tickets.categoryId }, { Categories.id })
+                        val select = if (statusFilter != null) {
+                            query.selectAll().where { Tickets.status eq statusFilter }
+                        } else {
+                            query.selectAll()
+                        }
+                        select.orderBy(Tickets.createdAt to SortOrder.DESC)
+                            .map { row ->
+                                TicketResponse(
+                                    id = row[Tickets.id],
+                                    guestName = row[Guests.fullName],
+                                    roomNumber = row[Guests.roomNumber],
+                                    categoryName = row[Categories.name],
+                                    description = row[Tickets.description],
+                                    status = row[Tickets.status],
+                                    createdAt = row[Tickets.createdAt]
+                                )
+                            }
+                    }
+                    call.respond(tickets)
+                }
+            }
+
+            put("/api/tickets/{id}/status") {
+                val ticketId = call.parameters["id"]?.toIntOrNull()
+                    ?: return@put call.respond(HttpStatusCode.BadRequest, "Invalid ticket ID")
+                val req = call.receive<Map<String, String>>()
+                val newStatus = req["status"] ?: return@put call.respond(HttpStatusCode.BadRequest, "Missing status")
+                val now = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+                val updatedRows = transaction {
+                    Tickets.update({ Tickets.id eq ticketId }) {
+                        it[Tickets.status] = newStatus
+                        it[Tickets.updatedAt] = now
+                    }
+                }
+                if (updatedRows > 0) {
+                    call.respond(mapOf("message" to "Status updated successfully"))
+                } else {
+                    call.respond(HttpStatusCode.NotFound, "Ticket not found")
+                }
+            }
+
+            delete("/api/tickets/{id}") {
+                val ticketId = call.parameters["id"]?.toIntOrNull()
+                    ?: return@delete call.respond(HttpStatusCode.BadRequest, "Invalid ticket ID")
+                val deletedRows = transaction {
+                    Tickets.deleteWhere { Tickets.id eq ticketId }
+                }
+                if (deletedRows > 0) {
+                    call.respond(mapOf("message" to "Ticket deleted successfully"))
                 } else {
                     call.respond(HttpStatusCode.NotFound, "Ticket not found")
                 }
