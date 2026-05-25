@@ -37,4 +37,34 @@ data class CreateStaffRequest(
 )
 
 @Serializable
+data class GuestResponse(
+    val id: Int,
+    val fullName: String,
+    val phone: String,
+    val roomNumber: String,
+    val isActive: Boolean
+)
+
+@Serializable
+data class StaffResponse(
+    val id: Int,
+    val username: String,
+    val role: String
+)
+
+@Serializable
+data class UpdateGuestRequest(
+    val fullName: String,
+    val phone: String,
+    val roomNumber: String,
+    val isActive: Boolean
+)
+
+@Serializable
+data class UpdateStaffRequest(
+    val username: String,
+    val role: String
+)
+
+@Serializable
 data class UpdateStatusRequest(val status: String, val assignedStaffId: Int? = null)

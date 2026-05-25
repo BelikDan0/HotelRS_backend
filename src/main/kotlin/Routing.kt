@@ -8,9 +8,13 @@ import com.example.Data.CreateTicketRequest
 import com.example.Data.LoginRequest
 import com.example.Data.Categories
 import com.example.Data.CreateGuestRequest
+import com.example.Data.GuestResponse
 import com.example.Data.Guests
 import com.example.Data.Staff
+import com.example.Data.StaffResponse
 import com.example.Data.Tickets
+import com.example.Data.UpdateGuestRequest
+import com.example.Data.UpdateStaffRequest
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.auth.*
@@ -152,6 +156,231 @@ fun Application.configureRouting() {
                 } catch (e: Exception) {
                     println("Error creating guest: ${e.message}")
                     call.respond(HttpStatusCode.BadRequest, "Error: ${e.message}")
+                }
+            }
+
+            get("/api/admin/guests") {
+                val principal = call.principal<JWTPrincipal>()
+                val role = principal?.payload?.getClaim("role")?.asString()
+
+                if (role != "ADMIN") {
+                    return@get call.respond(HttpStatusCode.Forbidden, "Only admin can view guests")
+                }
+
+                val guests = transaction {
+                    Guests.selectAll().map {
+                        GuestResponse(
+                            id = it[Guests.id],
+                            fullName = it[Guests.fullName],
+                            phone = it[Guests.phone],
+                            roomNumber = it[Guests.roomNumber],
+                            isActive = it[Guests.isActive]
+                        )
+                    }
+                }
+                call.respond(guests)
+            }
+
+            // Получение заявок по категориям для сотрудников (по их роли)
+            get("/api/staff/tickets") {
+                val principal = call.principal<JWTPrincipal>()
+                val role = principal?.payload?.getClaim("role")?.asString()
+                val userId = principal?.payload?.getClaim("userId")?.asInt()
+
+                if (role == "GUEST") {
+                    return@get call.respond(HttpStatusCode.Forbidden, "Only staff can access this endpoint")
+                }
+
+                // Определяем категории на основе роли сотрудника
+                val allowedCategories = when (role) {
+                    "CLEANER" -> listOf("Уборка номера")
+                    "MASTER" -> listOf("Технический ремонт")
+                    "STAFF" -> listOf("Рум-сервис", "Вопросы и пожелания")
+                    "ADMIN" -> null // ADMIN видит всё
+                    else -> emptyList()
+                }
+
+                val statusFilter = call.request.queryParameters["status"]
+
+                val tickets: List<TicketResponse> = transaction {
+                    val query = (Tickets innerJoin Guests innerJoin Categories)
+                    val baseQuery = if (allowedCategories != null) {
+                        query.select { Categories.name inList allowedCategories }
+                    } else {
+                        query.selectAll()
+                    }
+
+                    val finalQuery = if (statusFilter != null) {
+                        baseQuery.andWhere { Tickets.status eq statusFilter }
+                    } else {
+                        baseQuery
+                    }
+
+                    finalQuery.orderBy(Tickets.createdAt to SortOrder.DESC)
+                        .map { row ->
+                            TicketResponse(
+                                id = row[Tickets.id],
+                                guestName = row[Guests.fullName],
+                                roomNumber = row[Guests.roomNumber],
+                                categoryName = row[Categories.name],
+                                description = row[Tickets.description],
+                                status = row[Tickets.status],
+                                createdAt = row[Tickets.createdAt]
+                            )
+                        }
+                }
+                call.respond(tickets)
+            }
+
+            // ПОЛУЧЕНИЕ ВСЕХ СОТРУДНИКОВ (только для админов)
+            get("/api/admin/staff") {
+                val principal = call.principal<JWTPrincipal>()
+                val role = principal?.payload?.getClaim("role")?.asString()
+
+                if (role != "ADMIN") {
+                    return@get call.respond(HttpStatusCode.Forbidden, "Only admin can view staff")
+                }
+
+                val staffList = transaction {
+                    Staff.selectAll().map {
+                        StaffResponse(
+                            id = it[Staff.id],
+                            username = it[Staff.username],
+                            role = it[Staff.role]
+                        )
+                    }
+                }
+                call.respond(staffList)
+            }
+
+            // ОБНОВЛЕНИЕ ГОСТЯ (только для админов)
+            put("/api/admin/guests/{id}") {
+                val principal = call.principal<JWTPrincipal>()
+                val role = principal?.payload?.getClaim("role")?.asString()
+
+                if (role != "ADMIN") {
+                    return@put call.respond(HttpStatusCode.Forbidden, "Only admin can update guests")
+                }
+
+                val guestId = call.parameters["id"]?.toIntOrNull()
+                    ?: return@put call.respond(HttpStatusCode.BadRequest, "Invalid guest ID")
+
+                val req = call.receive<UpdateGuestRequest>()
+
+                val updated = transaction {
+                    Guests.update({ Guests.id eq guestId }) {
+                        it[fullName] = req.fullName
+                        it[phone] = req.phone
+                        it[roomNumber] = req.roomNumber
+                        it[isActive] = req.isActive
+                    }
+                }
+
+                if (updated > 0) {
+                    call.respond(mapOf("message" to "Guest updated successfully"))
+                } else {
+                    call.respond(HttpStatusCode.NotFound, "Guest not found")
+                }
+            }
+
+            // ОБНОВЛЕНИЕ СОТРУДНИКА (только для админов)
+            put("/api/admin/staff/{id}") {
+                val principal = call.principal<JWTPrincipal>()
+                val role = principal?.payload?.getClaim("role")?.asString()
+
+                if (role != "ADMIN") {
+                    return@put call.respond(HttpStatusCode.Forbidden, "Only admin can update staff")
+                }
+
+                val staffId = call.parameters["id"]?.toIntOrNull()
+                    ?: return@put call.respond(HttpStatusCode.BadRequest, "Invalid staff ID")
+
+                // Проверяем, не является ли сотрудник администратором
+                val currentStaff = transaction {
+                    Staff.select { Staff.id eq staffId }.firstOrNull()
+                }
+
+                if (currentStaff?.get(Staff.role) == "ADMIN") {
+                    return@put call.respond(HttpStatusCode.Forbidden, "Cannot modify admin user")
+                }
+
+                val req = call.receive<UpdateStaffRequest>()
+
+                val updated = transaction {
+                    Staff.update({ Staff.id eq staffId }) {
+                        it[Staff.username] = req.username
+                        it[Staff.role] = req.role
+                    }
+                }
+
+                if (updated > 0) {
+                    call.respond(mapOf("message" to "Staff updated successfully"))
+                } else {
+                    call.respond(HttpStatusCode.NotFound, "Staff not found")
+                }
+            }
+
+            // УДАЛЕНИЕ ГОСТЯ (только для админов)
+            delete("/api/admin/guests/{id}") {
+                val principal = call.principal<JWTPrincipal>()
+                val role = principal?.payload?.getClaim("role")?.asString()
+
+                if (role != "ADMIN") {
+                    return@delete call.respond(HttpStatusCode.Forbidden, "Only admin can delete guests")
+                }
+
+                val guestId = call.parameters["id"]?.toIntOrNull()
+                    ?: return@delete call.respond(HttpStatusCode.BadRequest, "Invalid guest ID")
+
+                // Проверяем, есть ли у гостя заявки
+                val hasTickets = transaction {
+                    Tickets.select { Tickets.guestId eq guestId }.any()
+                }
+
+                if (hasTickets) {
+                    return@delete call.respond(HttpStatusCode.BadRequest, "Cannot delete guest with existing tickets")
+                }
+
+                val deleted = transaction {
+                    Guests.deleteWhere { Guests.id eq guestId }
+                }
+
+                if (deleted > 0) {
+                    call.respond(mapOf("message" to "Guest deleted successfully"))
+                } else {
+                    call.respond(HttpStatusCode.NotFound, "Guest not found")
+                }
+            }
+
+            // УДАЛЕНИЕ СОТРУДНИКА (только для админов)
+            delete("/api/admin/staff/{id}") {
+                val principal = call.principal<JWTPrincipal>()
+                val role = principal?.payload?.getClaim("role")?.asString()
+
+                if (role != "ADMIN") {
+                    return@delete call.respond(HttpStatusCode.Forbidden, "Only admin can delete staff")
+                }
+
+                val staffId = call.parameters["id"]?.toIntOrNull()
+                    ?: return@delete call.respond(HttpStatusCode.BadRequest, "Invalid staff ID")
+
+                // Проверяем, не является ли сотрудник администратором
+                val currentStaff = transaction {
+                    Staff.select { Staff.id eq staffId }.firstOrNull()
+                }
+
+                if (currentStaff?.get(Staff.role) == "ADMIN") {
+                    return@delete call.respond(HttpStatusCode.Forbidden, "Cannot delete admin user")
+                }
+
+                val deleted = transaction {
+                    Staff.deleteWhere { Staff.id eq staffId }
+                }
+
+                if (deleted > 0) {
+                    call.respond(mapOf("message" to "Staff deleted successfully"))
+                } else {
+                    call.respond(HttpStatusCode.NotFound, "Staff not found")
                 }
             }
 
