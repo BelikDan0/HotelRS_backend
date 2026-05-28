@@ -1,33 +1,179 @@
-# app_clone_bitrix
+# HotelRS
 
-This project was created using the [Ktor Project Generator](https://start.ktor.io).
+Клиент-серверное приложение для управления заявками гостей отеля. Позволяет автоматизировать обработку запросов (уборка номера, технический ремонт, рум-сервис, вопросы), сократить время выполнения заявок и обеспечить разграничение прав доступа по ролям.
 
-Here are some useful links to get you started:
+## 📥 Исходный код
 
-* [Ktor Documentation](https://ktor.io/docs/home.html)
-* [Ktor GitHub page](https://github.com/ktorio/ktor)
-* [Ktor Slack chat](https://app.slack.com/client/T09229ZC6/C0A974TJ9). [Request an invite](https://surveys.jetbrains.com/s3/kotlin-slack-sign-up).
+Исходный код проекта доступен в репозитории:
+- **Backend (серверная часть)**: [HotelRS_Backend](https://github.com/BelikDan0/HotelRS_backend) — Ktor сервер на Kotlin
+- **Frontend (клиентская часть)**: [shared](https://github.com/Musyti/HotelRS_frontend/tree/main/shared) — Android приложение на Compose Multiplatform
 
-## Features
+## 🚀 Запуск проекта
 
-Here's a list of features included in this project:
+### 📦 Требования
 
-| Name                                                                      | Description                                              |
-|---------------------------------------------------------------------------|----------------------------------------------------------|
-| [CORS](https://start.ktor.io/p/io.ktor/server-cors)                       | Enables Cross-Origin Resource Sharing (CORS)             |
-| [Compression](https://start.ktor.io/p/io.ktor/server-compression)         | Compresses responses using encoding algorithms like GZIP |
-| [Default Headers](https://start.ktor.io/p/io.ktor/server-default-headers) | Adds a default set of headers to HTTP responses          |
+| Компонент | Требование |
+|-----------|------------|
+| Операционная система | Windows / macOS / Linux |
+| JDK | версия 17 или выше |
+| Kotlin | 2.0.0+ |
+| PostgreSQL | версия 13 или выше |
+| Android SDK | API 24+ (для клиента) |
 
-## Building & Running
+### 🐘 Настройка базы данных
 
-To build or run the project, use one of the following tasks:
+1. Установите [PostgreSQL](https://www.postgresql.org/)
+2. Создайте базу данных:
+```sql
+CREATE DATABASE database_number_hotel;
+```
+3. Настройте подключение в файле `DatabaseConnector.kt`:
+```kotlin
+Database.connect(
+    url = "jdbc:postgresql://localhost:5432/database_number_hotel",
+    driver = "org.postgresql.Driver",
+    user = "postgres",
+    password = "123"
+)
+```
 
-| Task | Description |
-|------|-------------|
+### ▶️ Запуск сервера
 
-If the server starts successfully, you'll see the following output:
+1. Откройте проект `HotelRS_backend` в IntelliJ IDEA
+2. Запустите файл `Application.kt` (функция `main`)
+3. Сервер запустится на порту `8080`
 
 ```
-2024-12-04 14:32:45.584 [main] INFO  Application - Application started in 0.303 seconds.
-2024-12-04 14:32:45.682 [main] INFO  Application - Responding at http://0.0.0.0:8080
+✅ Сервер запущен: http://127.0.0.1:8080
 ```
+
+### 📱 Запуск Android приложения
+
+1. Откройте проект в Android Studio
+2. Убедитесь, что сервер запущен
+3. Соберите и установите приложение на устройство или эмулятор
+4. При необходимости укажите IP-адрес сервера в `Platform.kt`
+
+## 🔑 Начало работы
+
+При первом запуске сервера автоматически создаются:
+
+| Логин | Пароль | Роль |
+|-------|--------|------|
+| `admin` | `admin` | Администратор |
+
+Также автоматически создаются категории заявок:
+- Уборка номера
+- Технический ремонт
+- Рум-сервис
+- Вопросы и пожелания
+
+## 👥 Роли пользователей
+
+### Администратор (ADMIN)
+- Просмотр всех заявок
+- Изменение статуса любой заявки
+- Удаление заявок
+- Создание и редактирование пользователей (гостей и сотрудников)
+- Управление категориями
+
+### Сотрудник (STAFF)
+- Просмотр заявок категорий «Рум-сервис» и «Вопросы и пожелания»
+- Изменение статуса (в работе → выполнена)
+
+### Горничная (CLEANER)
+- Просмотр заявок категории «Уборка номера»
+- Изменение статуса (в работе → выполнена)
+
+### Мастер (MASTER)
+- Просмотр заявок категории «Технический ремонт»
+- Изменение статуса (в работе → выполнена)
+
+### Гость (GUEST)
+- Создание новых заявок
+- Просмотр своих заявок
+- Отслеживание статуса выполнения
+
+## 📋 Функционал
+
+### Для гостя
+- Авторизация по номеру телефона
+- Создание заявки с выбором категории
+- Просмотр истории своих заявок
+- Отслеживание статуса (Новая → В работе → Выполнена)
+
+### Для сотрудника
+- Авторизация по логину/паролю
+- Просмотр заявок только своей категории
+- Изменение статуса заявки
+- Фильтрация заявок по статусу
+
+### Для администратора
+- Полный доступ ко всем заявкам
+- Управление пользователями (создание, редактирование, удаление)
+- Управление заявками (изменение статуса, удаление)
+- Просмотр статистики
+
+## 🛠️ Технологии
+
+| Компонент | Технология |
+|-----------|------------|
+| Язык программирования | Kotlin (Kotlin Multiplatform) |
+| Серверный фреймворк | Ktor 3.4.0 |
+| Клиентский фреймворк | Jetpack Compose (Material 3) |
+| База данных | PostgreSQL |
+| ORM | Exposed 0.47.0 |
+| Авторизация | JWT (JSON Web Token) |
+| HTTP клиент | Ktor Client |
+| Сериализация | kotlinx.serialization |
+| Асинхронность | Kotlin Coroutines |
+
+## 🗄️ Структура базы данных
+
+| Таблица | Назначение |
+|---------|------------|
+| `guests` | Гости отеля (ФИО, телефон, номер комнаты) |
+| `staff` | Сотрудники (логин, хеш пароля, роль) |
+| `categories` | Категории заявок (уборка, ремонт, рум-сервис, вопросы) |
+| `tickets` | Заявки (гость, категория, описание, статус, даты) |
+
+## 🔄 API Эндпоинты
+
+| Метод | Эндпоинт | Назначение |
+|-------|----------|-------------|
+| POST | `/api/auth/login` | Авторизация |
+| POST | `/api/tickets` | Создание заявки |
+| GET | `/api/guest/tickets` | Заявки гостя |
+| GET | `/api/admin/tickets` | Все заявки (админ) |
+| GET | `/api/staff/tickets` | Заявки по роли (сотрудник) |
+| PUT | `/api/tickets/{id}/status` | Изменение статуса |
+| DELETE | `/api/tickets/{id}` | Удаление заявки |
+| GET | `/api/admin/guests` | Список гостей (админ) |
+| GET | `/api/admin/staff` | Список сотрудников (админ) |
+
+## 📁 Структура проекта
+
+```
+app_clone_bitrix/                 # Серверная часть
+├── src/main/kotlin/
+│   ├── com/example/
+│   │   ├── Application.kt        # Точка входа
+│   │   ├── Data/                  # Модели и БД
+│   │   └── plugins/               # Роутинг и настройки
+│   └── resources/                 # Статические файлы
+│
+shared/                           # Клиентская часть (KMP)
+├── src/commonMain/kotlin/
+│   ├── org/example/project/
+│   │   ├── App.kt                 # UI приложения
+│   │   ├── models/                # Data классы
+│   │   └── network/               # ApiClient
+```
+
+## 📄 Лицензия
+
+Данный проект распространяется под лицензией MIT.
+
+---
+
+**Программа готова к использованию после настройки сервера и установки приложения!**
